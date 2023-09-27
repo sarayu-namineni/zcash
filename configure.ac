@@ -124,6 +124,12 @@ AC_ARG_ENABLE([wallet],
   [enable_wallet=$enableval],
   [enable_wallet=yes])
 
+AC_ARG_ENABLE([zuz],
+  [AS_HELP_STRING([--enable-zuz],
+  [enable zuz (default is yes)])],
+  [enable_zuz=$enableval],
+  [enable_zuz=yes])
+
 AC_ARG_ENABLE([mining],
   [AS_HELP_STRING([--enable-mining],
   [enable mining (default is yes)])],
@@ -1154,6 +1160,16 @@ else
   AC_MSG_RESULT(no)
 fi
 
+dnl enable zuz
+AC_MSG_CHECKING([if zuz should be enabled])
+if test x$enable_zuz != xno; then
+  AC_MSG_RESULT(yes)
+  AC_DEFINE_UNQUOTED([ENABLE_ZUZ],[1],[Define to 1 to enable zuz functions])
+
+else
+  AC_MSG_RESULT(no)
+fi
+
 dnl enable mining
 AC_MSG_CHECKING([if mining should be enabled])
 if test x$enable_mining != xno; then
@@ -1190,6 +1206,7 @@ AM_CONDITIONAL([TARGET_DARWIN], [test x$TARGET_OS = xdarwin])
 AM_CONDITIONAL([BUILD_DARWIN], [test x$BUILD_OS = xdarwin])
 AM_CONDITIONAL([TARGET_WINDOWS], [test x$TARGET_OS = xwindows])
 AM_CONDITIONAL([ENABLE_WALLET],[test x$enable_wallet = xyes])
+AM_CONDITIONAL([ENABLE_ZUZ],[test x$enable_zuz = xyes])
 AM_CONDITIONAL([ENABLE_MINING],[test x$enable_mining = xyes])
 AM_CONDITIONAL([ENABLE_TESTS],[test x$BUILD_TEST = xyes])
 AM_CONDITIONAL([ENABLE_BENCH],[test x$use_bench = xyes])
@@ -1303,6 +1320,7 @@ esac
 echo 
 echo "Options used to compile and link:"
 echo "  with wallet   = $enable_wallet"
+echo "  with zuz      = $enable_zuz"
 echo "  with zmq      = $use_zmq"
 echo "  with test     = $use_tests"
 echo "  use asm       = $use_asm"

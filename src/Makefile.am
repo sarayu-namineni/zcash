@@ -342,6 +342,7 @@ BITCOIN_CORE_H = \
   wallet/wallet.h \
   wallet/walletdb.h \
   wallet/wallet_tx_builder.h \
+  wallet/zuz.h \
   warnings.h \
   weighted_map.h \
   zip317.h \
@@ -442,6 +443,7 @@ libbitcoin_wallet_a_SOURCES = \
   wallet/rpcwallet.cpp \
   wallet/wallet.cpp \
   wallet/walletdb.cpp \
+  wallet/zuz.cpp \
   $(BITCOIN_CORE_H) \
   $(LIBZCASH_H)
 

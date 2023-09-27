@@ -45,6 +45,7 @@
 #include "wallet/asyncrpcoperation_sendmany.h"
 #include "wallet/asyncrpcoperation_shieldcoinbase.h"
 #include "wallet/wallet_tx_builder.h"
+#include "wallet/zuz.h"
 
 #include <stdint.h>
 
@@ -5938,6 +5939,69 @@ UniValue z_getnotescount(const UniValue& params, bool fHelp)
     return ret;
 }
 
+#ifdef ENABLE_ZUZ
+UniValue createzuzspec(const UniValue& params, bool fHelp)
+{
+    if (!EnsureWalletIsAvailable(fHelp))
+        return NullUniValue;
+    
+    if (fHelp || params.size() > 1)
+        throw runtime_error(
+            "createzuzspec\n"
+            "\nCreates a new ZUZ specification\n"
+            "\nArguments:\n"
+            "1. title: Name of the ZUZ specification\n"
+            "\nResult:\n"
+            "{\n"
+            "  \"specId\"   (numeric) Unique ID for the ZUZ specification\n"
+            "}\n"
+            "\nExamples:\n"
+            + HelpExampleCli("createzuzspec", "MyFirstZUZSpec")
+            + HelpExampleRpc("createzuzspec", "MyFirstZUZSpec")
+        );
+
+    ZUZSpecParams specParams;
+    specParams.userId = 0; // Temporary, value should be linked to user's wallet
+    specParams.title = params[0].get_str();
+    specID specId = zuz->createSpec(specParams);
+
+    UniValue ret(UniValue::VOBJ);
+    ret.pushKV("specId: ", static_cast<uint64_t>(specId));
+
+    return ret;
+}
+
+UniValue getzuzspec(const UniValue& params, bool fHelp)
+{
+    if (fHelp || params.size() > 1)
+        throw runtime_error(
+            "getzuzspec\n"
+            "\nRetrieves details about a ZUZ specification\n"
+            "\nArguments:\n"
+            "1. specID: Unique ID for the ZUZ specification\n"
+            "\nResult:\n"
+            "{\n"
+            "  \"specId\"   (numeric) Unique ID for the ZUZ specification\n"
+            "  \"userId\"   (numeric) Unique ID for the owner of the ZUZ specification\n"
+            "  \"title\"    (string) Name of the ZUZ specification\n"
+            "}\n"
+            "\nExamples:\n"
+            + HelpExampleCli("getzuzspec", "0")
+            + HelpExampleRpc("getzuzspec", "0")
+        );
+    
+    specID specId = params[0].get_int();
+    ZUZSpec spec = zuz->allSpecs[specId];
+
+    UniValue ret(UniValue::VOBJ);
+    ret.pushKV("specID", static_cast<uint64_t>(spec.specId));
+    ret.pushKV("userID", static_cast<uint64_t>(spec.userId));
+    ret.pushKV("title",spec.title);
+
+    return ret;
+}
+#endif
+
 extern UniValue dumpprivkey(const UniValue& params, bool fHelp); // in rpcdump.cpp
 extern UniValue importprivkey(const UniValue& params, bool fHelp);
 extern UniValue importaddress(const UniValue& params, bool fHelp);
@@ -6022,6 +6086,11 @@ static const CRPCCommand commands[] =
     { "wallet",             "z_importwallet",           &z_importwallet,           true  },
     { "wallet",             "z_viewtransaction",        &z_viewtransaction,        false },
     { "wallet",             "z_getnotescount",          &z_getnotescount,          false },
+    // ZUZ
+#ifdef ENABLE_ZUZ
+    { "zuz",                "createzuzspec",            &createzuzspec,            true  },
+    { "zuz",                "getzuzspec",               &getzuzspec,               true  },
+#endif
     // TODO: rearrange into another category
     { "disclosure",         "z_getpaymentdisclosure",   &z_getpaymentdisclosure,   true  },
     { "disclosure",         "z_validatepaymentdisclosure", &z_validatepaymentdisclosure, true }

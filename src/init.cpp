@@ -46,6 +46,9 @@
 #include "wallet/wallet.h"
 #include "wallet/walletdb.h"
 #endif
+#ifdef ENABLE_ZUZ
+#include "wallet/zuz.h"
+#endif
 #include "warnings.h"
 #include "zip317.h"
 #include <chrono>
@@ -1889,6 +1892,10 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
 #else // ENABLE_WALLET
     LogPrintf("No wallet support compiled in!\n");
 #endif // !ENABLE_WALLET
+
+#ifdef ENABLE_ZUZ
+    zuz = new ZUZ();
+#endif
 
 #ifdef ENABLE_MINING
  #ifndef ENABLE_WALLET
