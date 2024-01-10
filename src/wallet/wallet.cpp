@@ -42,6 +42,10 @@
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/thread.hpp>
 
+#include <chrono>
+
+using namespace std::chrono;
+
 using namespace std;
 using namespace libzcash;
 
@@ -2239,20 +2243,24 @@ SpendableInputs CWallet::FindSpendableInputs(
     AssertLockHeld(cs_wallet);
 
     KeyIO keyIO(Params());
+    printf("FindSpendableInputs\n");
 
     bool selectTransparent{selector.SelectsTransparent()};
     bool selectSprout{selector.SelectsSprout()};
     bool selectSapling{selector.SelectsSapling()};
     bool selectOrchard{selector.SelectsOrchard()};
+    printf("selectTransparent: %d, selectSprout: %d, selectSapling: %d, selectOrchard: %d\n", 
+        selectTransparent, selectSprout, selectSapling, selectOrchard);
 
     SpendableInputs unspent;
     for (auto const& [wtxid, wtx] : mapWallet) {
         bool isCoinbase = wtx.IsCoinBase();
         auto nDepth = wtx.GetDepthInMainChain(asOfHeight);
+        printf("isFinal: %d, nDepth: %d, minDepth: %d, isCoinbaes: %d\n", CheckFinalTx(wtx), nDepth, minDepth, isCoinbase);
 
         // Filter the transactions before checking for coins
         if (!CheckFinalTx(wtx)) continue;
-        if (nDepth < 0 || nDepth < minDepth) continue;
+        // if (nDepth < 0 || nDepth < minDepth) continue;
 
         if (selectTransparent && (
             (
@@ -2266,8 +2274,10 @@ SpendableInputs CWallet::FindSpendableInputs(
                 selector.transparentCoinbasePolicy != TransparentCoinbasePolicy::Require
             )
         )) {
+            printf("wtx.vout.size(): %lu\n", wtx.vout.size());
             for (int i = 0; i < wtx.vout.size(); i++) {
                 const auto& output = wtx.vout[i];
+                printf("Output %d: %lld\n", i, output.nValue);
                 isminetype mine = IsMine(output);
 
                 // skip spent utxos
@@ -5507,6 +5517,8 @@ bool CWallet::FundTransaction(CMutableTransaction& tx, CAmount &nFeeRet, int& nC
 bool CWallet::CreateTransaction(const vector<CRecipient>& vecSend, CWalletTx& wtxNew, CReserveKey& reservekey, CAmount& nFeeRet,
                                 int& nChangePosRet, std::string& strFailReason, const CCoinControl* coinControl, bool sign)
 {
+    auto start = high_resolution_clock::now();
+
     CAmount nValue = 0;
     unsigned int nSubtractFeeFromAmount = 0;
     for (const CRecipient& recipient : vecSend)
@@ -5789,6 +5801,9 @@ bool CWallet::CreateTransaction(const vector<CRecipient>& vecSend, CWalletTx& wt
             }
         }
     }
+    auto stop = high_resolution_clock::now();
+    auto duration = duration_cast<microseconds>(stop - start);
+    cout << "create transaction: " << duration.count() << endl;
 
     return true;
 }
@@ -5798,6 +5813,7 @@ bool CWallet::CreateTransaction(const vector<CRecipient>& vecSend, CWalletTx& wt
  */
 bool CWallet::CommitTransaction(CWalletTx& wtxNew, std::optional<std::reference_wrapper<CReserveKey>> reservekey, CValidationState& state)
 {
+    auto start = high_resolution_clock::now();
     {
         LOCK2(cs_main, cs_wallet);
         LogPrintf("CommitTransaction:\n%s", wtxNew.ToString()); /* Continued */
@@ -5841,6 +5857,9 @@ bool CWallet::CommitTransaction(CWalletTx& wtxNew, std::optional<std::reference_
             wtxNew.RelayWalletTransaction();
         }
     }
+    auto stop = high_resolution_clock::now();
+    auto duration = duration_cast<microseconds>(stop - start);
+    cout << "commit transaction: " << duration.count() << endl;
     return true;
 }
 

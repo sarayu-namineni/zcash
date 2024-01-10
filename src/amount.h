@@ -13,6 +13,10 @@
 #include <string>
 
 typedef int64_t CAmount;
+typedef struct ZUZAmount {
+    CAmount amt;
+    int16_t specId;
+} ZUZAmount_t;
 
 static const CAmount COIN = 100000000;
 static const CAmount CENT = 1000000;

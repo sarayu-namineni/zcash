@@ -16,7 +16,7 @@ typedef struct {
 class ZUZ
 {
 private:
-	specID id = 0;
+	specID id = 7;
 
 public: 
 	std::map<specID, ZUZSpec> allSpecs; 

@@ -183,8 +183,11 @@ static const CRPCConvertTable rpcCvtTable =
     { "z_listoperationids",          {{}, {s}} },
     { "z_getnotescount",             {{}, {o, o}} },
     // zuz
-    { "createzuzspec",               {{s}, {}} },
+    { "createzuzspec",               {{s, s}, {}} },
     { "getzuzspec",                  {{o}, {}}},
+    { "mintzuzspec",                 {{o, o, o}, {}}},
+    { "transferzuz",                 {{o, o}, {}}},
+    { "transferzuz2",                {{s, o, o}, {o, o, s}} },
     // server
     { "help",                        {{}, {s}} },
     { "setlogfilter",                {{s}, {}} },

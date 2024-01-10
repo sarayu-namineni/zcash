@@ -90,6 +90,39 @@ std::string CTxOut::ToString() const
     return strprintf("CTxOut(nValue=%d.%08d, scriptPubKey=%s)", nValue / COIN, nValue % COIN, HexStr(scriptPubKey).substr(0, 30));
 }
 
+ZUZOut::ZUZOut(const CAmount amt, const int16_t specId, CScript scriptPubKeyIn)
+{
+    nValue.amt = amt;
+    nValue.specId = specId;
+    scriptPubKey = scriptPubKeyIn;
+}
+
+CAmount ZUZOut::GetDustThreshold() const
+{
+    // See the comment on ONE_THIRD_DUST_THRESHOLD_RATE in policy.h.
+    static const CFeeRate oneThirdDustThresholdRate {ONE_THIRD_DUST_THRESHOLD_RATE};
+
+    if (scriptPubKey.IsUnspendable())
+        return 0;
+
+    // A typical spendable txout is 34 bytes, and will need a txin of at
+    // least 148 bytes to spend. With ONE_THIRD_DUST_THRESHOLD_RATE == 100,
+    // the dust threshold for such a txout would be
+    // 3*floor(100*(34 + 148)/1000) zats = 54 zats.
+    size_t nSize = GetSerializeSize(*this, SER_DISK, 0) + 148u;
+    return 3*oneThirdDustThresholdRate.GetFee(nSize);
+}
+
+uint256 ZUZOut::GetHash() const
+{
+    return SerializeHash(*this);
+}
+
+std::string ZUZOut::ToString() const
+{
+    return strprintf("ZUZOut(amt=%d.%08d, specId=%d, scriptPubKey=%s)", nValue.amt / COIN, nValue.amt % COIN, nValue.specId, HexStr(scriptPubKey).substr(0, 30));
+}
+
 
 CMutableTransaction::CMutableTransaction() : nVersion(CTransaction::SPROUT_MIN_CURRENT_VERSION), fOverwintered(false), nVersionGroupId(0), nExpiryHeight(0), nLockTime(0) {}
 CMutableTransaction::CMutableTransaction(const CTransaction& tx) : nVersion(tx.nVersion), fOverwintered(tx.fOverwintered), nVersionGroupId(tx.nVersionGroupId), nExpiryHeight(tx.nExpiryHeight),

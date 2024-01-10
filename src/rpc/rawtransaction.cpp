@@ -34,6 +34,10 @@
 #include <univalue.h>
 #include <rust/bridge.h>
 
+#include <chrono>
+
+using namespace std::chrono;
+
 using namespace std;
 
 void ScriptPubKeyToJSON(const CScript& scriptPubKey, UniValue& out, bool fIncludeHex)
@@ -672,6 +676,7 @@ UniValue verifytxoutproof(const UniValue& params, bool fHelp)
 
 UniValue createrawtransaction(const UniValue& params, bool fHelp)
 {
+    auto start = high_resolution_clock::now();
     if (fHelp || params.size() < 2 || params.size() > 4)
         throw runtime_error(
             "createrawtransaction [{\"txid\":\"id\",\"vout\":n},...] {\"address\":amount,...} ( locktime ) ( expiryheight )\n"
@@ -791,6 +796,11 @@ UniValue createrawtransaction(const UniValue& params, bool fHelp)
         CTxOut out(nAmount, scriptPubKey);
         rawTx.vout.push_back(out);
     }
+
+    auto stop = high_resolution_clock::now();
+    auto duration = duration_cast<microseconds>(stop - start);
+
+    cout << "createrawtransaction: " << duration.count() << endl;
 
     return EncodeHexTx(rawTx);
 }
@@ -948,6 +958,7 @@ static void TxInErrorToJSON(const CTxIn& txin, UniValue& vErrorsRet, const std::
 
 UniValue signrawtransaction(const UniValue& params, bool fHelp)
 {
+    auto start = high_resolution_clock::now();
     if (fHelp || params.size() < 1 || params.size() > 5)
         throw runtime_error(
             "signrawtransaction \"hexstring\" ( [{\"txid\":\"id\",\"vout\":n,\"scriptPubKey\":\"hex\",\"redeemScript\":\"hex\"},...] [\"privatekey1\",...] sighashtype )\n"
@@ -1225,11 +1236,17 @@ UniValue signrawtransaction(const UniValue& params, bool fHelp)
         result.pushKV("errors", vErrors);
     }
 
+    auto stop = high_resolution_clock::now();
+    auto duration = duration_cast<microseconds>(stop - start);
+
+    cout << "signrawtransaction: " << duration.count() << endl;
+
     return result;
 }
 
 UniValue sendrawtransaction(const UniValue& params, bool fHelp)
 {
+    auto start = high_resolution_clock::now();
     if (fHelp || params.size() < 1 || params.size() > 2)
         throw runtime_error(
             "sendrawtransaction \"hexstring\" ( allowhighfees )\n"
@@ -1301,6 +1318,11 @@ UniValue sendrawtransaction(const UniValue& params, bool fHelp)
         throw JSONRPCError(RPC_TRANSACTION_ALREADY_IN_CHAIN, "transaction already in block chain");
     }
     RelayTransaction(tx);
+
+    auto stop = high_resolution_clock::now();
+    auto duration = duration_cast<microseconds>(stop - start);
+
+    cout << "sendrawtransaction: " << duration.count() << endl;
 
     return hashTx.GetHex();
 }

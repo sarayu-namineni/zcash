@@ -57,6 +57,15 @@ static bool MatchPayToPubkeyHash(const CScript& script, valtype& pubkeyhash)
     return false;
 }
 
+static bool MatchToCreateZUZ(const CScript& script, valtype& pubkeyhash)
+{
+    if (script.IsCreateZUZ()) {
+        pubkeyhash = valtype(script.begin () + 3, script.begin() + 23);
+        return true;
+    }
+    return false;
+}
+
 /** Test for "small positive integer" script opcodes - OP_1 through OP_16. */
 static constexpr bool IsSmallInteger(opcodetype opcode)
 {
@@ -113,6 +122,13 @@ bool Solver(const CScript& scriptPubKey, txnouttype& typeRet, std::vector<std::v
     }
 
     if (MatchPayToPubkeyHash(scriptPubKey, data)) {
+        typeRet = TX_PUBKEYHASH;
+        vSolutionsRet.push_back(std::move(data));
+        return true;
+    }
+    
+    if (MatchToCreateZUZ(scriptPubKey, data)) {
+        // printf("Solver IsCreateZUZ\n");
         typeRet = TX_PUBKEYHASH;
         vSolutionsRet.push_back(std::move(data));
         return true;
@@ -252,12 +268,47 @@ public:
 };
 }
 
+class CScriptVisitorZUZ
+{
+private:
+    CScript *script;
+public:
+    CScriptVisitorZUZ(CScript *scriptin) { script = scriptin; }
+
+    bool operator()(const CNoDestination &dest) const {
+        script->clear();
+        return false;
+    }
+
+    bool operator()(const CKeyID &keyID) const {
+        script->clear();
+        *script << OP_DUP << OP_HASH160 << ToByteVector(keyID) << OP_EQUALVERIFY << OP_CHECKSIGVERIFY;
+        return true;
+    }
+
+    bool operator()(const CScriptID &scriptID) const {
+        script->clear();
+        *script << OP_HASH160 << ToByteVector(scriptID) << OP_EQUAL;
+        return true;
+    }
+
+};
+
 CScript GetScriptForDestination(const CTxDestination& dest)
 {
     CScript script;
 
     std::visit(CScriptVisitor(&script), dest);
     return script;
+}
+
+CScript GetScriptForCreateZUZ(const CTxDestination& dest, const std::vector<unsigned char> specId)
+{
+    CScript script;
+
+    std::visit(CScriptVisitorZUZ(&script), dest);
+
+    return script << specId << OP_EQUAL;
 }
 
 CScript GetScriptForRawPubKey(const CPubKey& pubKey)

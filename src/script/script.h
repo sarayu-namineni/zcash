@@ -173,6 +173,9 @@ enum opcodetype
     OP_NOP10 = 0xb9,
 
     OP_INVALIDOPCODE = 0xff,
+
+    // ZUZ
+    OP_ZUZ = 0xc1
 };
 
 const char* GetOpName(opcodetype opcode);
@@ -593,6 +596,9 @@ public:
      * pay-to-script-hash transactions:
      */
     unsigned int GetSigOpCount(const CScript& scriptSig) const;
+
+    // ZUZ
+    bool IsCreateZUZ() const;
 
     // insightexplorer, there may be more script types in the future
     enum ScriptType : int {

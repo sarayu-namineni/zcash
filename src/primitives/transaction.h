@@ -412,6 +412,64 @@ public:
     std::string ToString() const;
 };
 
+class ZUZOut : public CTxOut
+{
+public:
+    ZUZAmount_t nValue;
+    CScript scriptPubKey;
+
+    ZUZOut()
+    {
+        SetNull();
+    }
+
+    ZUZOut(const CAmount amt, const int16_t specId, CScript scriptPubKeyIn);
+
+    ADD_SERIALIZE_METHODS;
+
+    template <typename Stream, typename Operation>
+    inline void SerializationOp(Stream& s, Operation ser_action) {
+        READWRITE(nValue.amt);
+        READWRITE(nValue.specId);
+        READWRITE(*(CScriptBase*)(&scriptPubKey));
+    }
+
+    void SetNull()
+    {
+        nValue.amt = -1;
+        nValue.specId = -1;
+        scriptPubKey.clear();
+    }
+
+    bool IsNull() const
+    {
+        return (nValue.amt == -1 || nValue.specId == -1);
+    }
+
+    uint256 GetHash() const;
+
+    CAmount GetDustThreshold() const;
+
+    bool IsDust() const
+    {
+        return nValue.amt < GetDustThreshold();
+    }
+
+    friend bool operator==(const ZUZOut& a, const ZUZOut& b)
+    {
+        return (a.nValue.amt       == b.nValue.amt &&
+                a.nValue.specId    == b.nValue.specId &&
+                a.scriptPubKey == b.scriptPubKey);
+    }
+
+    friend bool operator!=(const ZUZOut& a, const ZUZOut& b)
+    {
+        return !(a == b);
+    }
+
+    std::string ToString() const;
+};
+
 struct WTxId
 {
     const uint256 hash;
@@ -748,6 +806,27 @@ public:
     bool IsCoinBase() const
     {
         return (vin.size() == 1 && vin[0].prevout.IsNull());
+    }
+
+    // ZUZ
+    bool IsCreateZUZ() const {
+        // return true;
+        // printf("IsCreateZUZ: vout.size(): %lu, vout[0].scriptPubKey.IsCreateZUZ: %d\n", vout.size(), vout[0].scriptPubKey.IsCreateZUZ());
+        return (vin.size() == 0 && vout.size() == 1 && vout[0].scriptPubKey.IsCreateZUZ());
+    }
+
+    bool IsMintZUZ() const {
+        // printf("IsCreateZUZ: vin.size(): %lu, vout.size(): %lu, vout[0].scriptPubKey.IsCreateZUZ: %d\n", vin.size(), vout.size(), vout[0].scriptPubKey.IsCreateZUZ());
+        return (vin.size() == 1 && vout.size() == 2 && vout[0].scriptPubKey.IsCreateZUZ() && vout[1].scriptPubKey.IsCreateZUZ() && vout[0].nValue >= vout[1].nValue);
+    }
+
+    bool IsTransferZUZ() const {
+        for (CTxOut out : vout) {
+            if (out.scriptPubKey.IsCreateZUZ()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     friend bool operator==(const CTransaction& a, const CTransaction& b)

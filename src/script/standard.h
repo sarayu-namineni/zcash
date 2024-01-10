@@ -120,6 +120,7 @@ bool ExtractDestinations(const CScript& scriptPubKey, txnouttype& typeRet, std::
  * script for CNoDestination.
  */
 CScript GetScriptForDestination(const CTxDestination& dest);
+CScript GetScriptForCreateZUZ(const CTxDestination& dest, std::vector<unsigned char> specId);
 CScript GetScriptForRawPubKey(const CPubKey& pubkey);
 
 /** Generate a multisig script. */

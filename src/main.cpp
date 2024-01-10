@@ -1428,7 +1428,8 @@ bool CheckTransactionWithoutProofVerification(const CTransaction& tx, CValidatio
     if (tx.vin.empty() &&
         tx.vJoinSplit.empty() &&
         tx.GetSaplingSpendsCount() == 0 &&
-        !orchard_bundle.SpendsEnabled())
+        !orchard_bundle.SpendsEnabled() &&
+        !tx.IsCreateZUZ())
     {
         return state.DoS(10, false, REJECT_INVALID, "bad-txns-no-source-of-funds");
     }
@@ -1664,7 +1665,7 @@ bool CheckTransactionWithoutProofVerification(const CTransaction& tx, CValidatio
         }
     }
 
-    if (tx.IsCoinBase())
+    if (tx.IsCoinBase() && !tx.IsCreateZUZ())
     {
         // There should be no joinsplits in a coinbase transaction
         if (tx.vJoinSplit.size() > 0)
@@ -1740,7 +1741,7 @@ bool AcceptToMemoryPool(
     }
 
     // Coinbase is only valid in a block, not as a loose transaction
-    if (tx.IsCoinBase())
+    if (tx.IsCoinBase() && !tx.IsCreateZUZ())
         return state.DoS(100, false, REJECT_INVALID, "coinbase");
 
     // Rather not work on nonstandard transactions (unless -regtest)
@@ -1873,7 +1874,7 @@ bool AcceptToMemoryPool(
         // using the modified fee) are not accepted to the mempool or relayed.
         // <https://zips.z.cash/zip-0317#transaction-relaying>
         size_t nUnpaidActionCount = entry.GetUnpaidActionCount();
-        if (nUnpaidActionCount > nTxUnpaidActionLimit) {
+        if (!entry.GetTx().IsCreateZUZ() && !entry.GetTx().IsMintZUZ() && nUnpaidActionCount > nTxUnpaidActionLimit) {
             LogPrint("mempool",
                     "Not accepting transaction with txid %s, size %d bytes, effective fee %d " + MINOR_CURRENCY_UNIT +
                     ", and fee delta %d " + MINOR_CURRENCY_UNIT + " to the mempool because it has %d unpaid actions"
@@ -1883,7 +1884,7 @@ bool AcceptToMemoryPool(
             return state.DoS(0, false, REJECT_INSUFFICIENTFEE, "tx unpaid action limit exceeded");
         }
 
-        if (fRejectAbsurdFee && nFees > maxTxFee) {
+        if (!entry.GetTx().IsTransferZUZ() && fRejectAbsurdFee && nFees > maxTxFee) {
             return state.Invalid(false,
                 REJECT_HIGHFEE, "absurdly-high-fee",
                 strprintf("%d > %d", nFees, maxTxFee));
@@ -2596,7 +2597,7 @@ bool ContextualCheckInputs(
     uint32_t consensusBranchId,
     std::vector<CScriptCheck> *pvChecks)
 {
-    if (!tx.IsCoinBase())
+    if (!tx.IsCoinBase() && !tx.IsCreateZUZ() && !tx.IsMintZUZ())
     {
         if (!Consensus::CheckTxInputs(tx, state, inputs, GetSpendHeight(inputs), consensusParams)) {
             return false;

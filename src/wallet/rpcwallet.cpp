@@ -61,6 +61,11 @@
 
 #include <rust/ed25519.h>
 
+#include "script/sign.h"
+#include <chrono>
+
+using namespace std::chrono;
+
 using namespace std;
 
 using namespace libzcash;
@@ -382,6 +387,7 @@ ResolveTransactionStrategy(
 
 UniValue sendtoaddress(const UniValue& params, bool fHelp)
 {
+    auto start = high_resolution_clock::now();
     if (!EnsureWalletIsAvailable(fHelp))
         return NullUniValue;
 
@@ -440,7 +446,16 @@ UniValue sendtoaddress(const UniValue& params, bool fHelp)
 
     EnsureWalletIsUnlocked();
 
+    auto start2 = high_resolution_clock::now();
     SendMoney(dest, nAmount, fSubtractFeeFromAmount, wtx);
+    auto stop2 = high_resolution_clock::now();
+    auto duration2 = duration_cast<microseconds>(stop2 - start2);
+    cout << "send money: " << duration2.count() << endl;
+
+    auto stop = high_resolution_clock::now();
+    auto duration = duration_cast<microseconds>(stop - start);
+
+    cout << "send to address: " << duration.count() << endl;
 
     return wtx.GetHash().GetHex();
 }
@@ -5942,10 +5957,11 @@ UniValue z_getnotescount(const UniValue& params, bool fHelp)
 #ifdef ENABLE_ZUZ
 UniValue createzuzspec(const UniValue& params, bool fHelp)
 {
+    auto start = high_resolution_clock::now();
     if (!EnsureWalletIsAvailable(fHelp))
         return NullUniValue;
     
-    if (fHelp || params.size() > 1)
+    if (fHelp || params.size() > 2)
         throw runtime_error(
             "createzuzspec\n"
             "\nCreates a new ZUZ specification\n"
@@ -5961,14 +5977,44 @@ UniValue createzuzspec(const UniValue& params, bool fHelp)
         );
 
     ZUZSpecParams specParams;
-    specParams.userId = 0; // Temporary, value should be linked to user's wallet
+    specParams.userId = 0; // Temporary, userId should be linked to user's wallet
     specParams.title = params[0].get_str();
-    specID specId = zuz->createSpec(specParams);
+    // specID specId = zuz->createSpec(specParams);
+
+    // Check that the from address can receive funds
+    KeyIO keyIO(Params());
+    auto owner = params[1].get_str();
+    auto pa = keyIO.DecodePaymentAddress(owner);
+
+    if (!pa.has_value()) {
+        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid address, should be a taddr or zaddr.");
+    }
+
+    CTxDestination dest = keyIO.DecodeDestination(owner);
+    std::vector<unsigned char> specId = std::vector<unsigned char>{0xf, 0x1};
+    CScript scriptPubKey = GetScriptForCreateZUZ(dest, specId);
+
+    int nextBlockHeight = chainActive.Height() + 1;
+
+    CMutableTransaction rawTx = CreateNewContextualCMutableTransaction(
+        Params().GetConsensus(), nextBlockHeight, nPreferredTxVersion < ZIP225_MIN_TX_VERSION);
+
+    CTxOut out(0, scriptPubKey);
+    rawTx.vout.push_back(out);
+
+    CTransaction cTx = CTransaction(rawTx);
+    uint256 hash = cTx.GetHash();
+    SendTransaction(cTx, std::vector<RecipientMapping>(), std::nullopt, false);
 
     UniValue ret(UniValue::VOBJ);
-    ret.pushKV("specId: ", static_cast<uint64_t>(specId));
+    ret.pushKV("txId: ", static_cast<std::string>(hash.GetHex()));
 
-    return ret;
+    auto stop = high_resolution_clock::now();
+    auto duration = duration_cast<microseconds>(stop - start);
+
+    cout << "createzuzspec: " << duration.count() << endl;
+
+    return hash.GetHex();
 }
 
 UniValue getzuzspec(const UniValue& params, bool fHelp)
@@ -5994,12 +6040,776 @@ UniValue getzuzspec(const UniValue& params, bool fHelp)
     ZUZSpec spec = zuz->allSpecs[specId];
 
     UniValue ret(UniValue::VOBJ);
-    ret.pushKV("specID", static_cast<uint64_t>(spec.specId));
-    ret.pushKV("userID", static_cast<uint64_t>(spec.userId));
+    ret.pushKV("specId", static_cast<uint64_t>(spec.specId));
+    ret.pushKV("userId", static_cast<uint64_t>(spec.userId));
     ret.pushKV("title",spec.title);
 
     return ret;
 }
+
+UniValue mintzuzspec(const UniValue& params, bool fHelp)
+{
+    auto start = high_resolution_clock::now();
+    
+    if (fHelp || params.size() > 3)
+        throw runtime_error(
+            "mintzuzspec\n"
+            "\nAllows any individual with minting authority over a ZUZ specification to create new instances of it\n"
+            "\nArguments:\n"
+            "1. specID: Unique ID for the ZUZ specification\n"
+            "2. amount: Number of instances to mint\n"
+            "\nResult:\n"
+            "{\n"
+            "  \"specId\"   (numeric) Unique ID for the ZUZ specification\n"
+            "  \"amount\"   (numeric) Number of minted instances\n"
+            "}\n"
+            "\nExamples:\n"
+            + HelpExampleCli("mintzuzspec", "0")
+            + HelpExampleRpc("mintzuzspec", "0")
+        );
+    
+    // specID specId = params[0].get_int();
+
+    // check that user has minting authority 
+    // ZUZSpec spec = zuz->allSpecs[specId];
+    // Temporary, userId should be linked to user's wallet
+    // if (spec.userId != 0) {
+    //     throw runtime_error(
+    //         strprintf("User with ID %d does not have the authority to mint ZUZ spec with ID %d", 0, specId)
+    //         );
+    // }
+
+    specID mintAmount = params[1].get_int();
+
+#ifdef ENABLE_WALLET
+    LOCK2(cs_main, pwalletMain ? &pwalletMain->cs_wallet : NULL);
+#else
+    LOCK(cs_main);
+#endif
+
+    if (params[2].isNull())
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, argument 3 must be non-null");
+
+    int nextBlockHeight = chainActive.Height() + 1;
+
+    CMutableTransaction rawTx = CreateNewContextualCMutableTransaction(
+        Params().GetConsensus(), nextBlockHeight, nPreferredTxVersion < ZIP225_MIN_TX_VERSION);
+
+    UniValue o = params[2].get_obj();
+    uint256 txid = ParseHashO(o, "txid");
+
+    const UniValue& vout_v = find_value(o, "vout");
+    if (!vout_v.isNum())
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, missing vout key");
+    int nOut = vout_v.get_int();
+    if (nOut != 0)
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, vout must be positive");
+
+    vector<unsigned char> pkData(ParseHexO(o, "scriptPubKey"));
+    CScript scriptPubKey(pkData.begin(), pkData.end());
+
+    CAmount amount = AmountFromValue(find_value(o, "amount"));
+
+    uint32_t nSequence = (rawTx.nLockTime ? std::numeric_limits<uint32_t>::max() - 1 : std::numeric_limits<uint32_t>::max());
+    
+    CTxIn in(COutPoint(txid, nOut), scriptPubKey, nSequence);
+    rawTx.vin.push_back(in);
+
+    CAmount prevAmount = 0;
+
+    // Fetch previous transactions (inputs):
+    CCoinsViewDummy viewDummy;
+    CCoinsViewCache view(&viewDummy);
+    {
+        LOCK(mempool.cs);
+        CCoinsViewCache &viewChain = *pcoinsTip;
+        CCoinsViewMemPool viewMempool(&viewChain, mempool);
+        view.SetBackend(viewMempool); // temporarily switch cache backend to db+mempool view
+
+        for (const CTxIn& txin : rawTx.vin) {
+            const uint256& prevHash = txin.prevout.hash;
+            CTransaction tx;
+            uint256 hashBlock = uint256();
+            bool foundTransaction = GetTransaction(prevHash, tx, Params().GetConsensus(), hashBlock, true);
+            if (foundTransaction) {
+                if (tx.IsMintZUZ()) {
+                    CAmount newTxAmount = tx.vout[0].nValue;
+                    CAmount instanceAmount = tx.vout[1].nValue;
+                    CAmount prevTxAmount = 0;
+                    for (const CTxIn& prevtxin : tx.vin) {
+                        const uint256& prevprevHash = prevtxin.prevout.hash;
+                        CTransaction prevTx;
+                        uint256 prevHashBlock = uint256();
+                        bool foundPrevTransaction = GetTransaction(prevprevHash, prevTx, Params().GetConsensus(), prevHashBlock, true);
+                        if (foundPrevTransaction) {
+                            if(!prevTx.IsCreateZUZ() && !prevTx.IsMintZUZ()) {
+                                throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid input to mint transaction 1");
+                            } else if (instanceAmount != (newTxAmount - prevTx.vout[0].nValue)) {
+                                printf("instanceAmount: %lld, prevTx.vout[0].nValue: %lld\n", instanceAmount, prevTx.vout[0].nValue);
+                                throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid input to mint transaction 2");
+                            }
+                        }
+                    }
+                } else if (tx.IsCreateZUZ()) {
+                    if (tx.vout[0].nValue != 0) {
+                        throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid input to mint transaction 3");
+                    }
+                }
+                if(!tx.IsCreateZUZ() && !tx.IsMintZUZ()) {
+                    throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid input to mint transaction");
+                }
+            }
+            const CCoins* coins = view.AccessCoins(prevHash); // this is certainly allowed to fail
+            if (coins != NULL && coins->vout.size() > 0) {
+                prevAmount = coins->vout[0].nValue;
+                printf("prevAmount: %lld\n", prevAmount);
+            }
+            
+        }
+
+        view.SetBackend(viewDummy); // switch back to avoid locking mempool for too long
+    }
+
+    CKeyID ownerPubkey(std::vector<unsigned char>(scriptPubKey.begin() + 3, scriptPubKey.begin() + 23));
+    CTxDestination dest = ownerPubkey;
+    uint16_t n = scriptPubKey[25];
+    std::vector<unsigned char> specId = std::vector<unsigned char>(scriptPubKey.begin() + 26, scriptPubKey.begin() + 26 + n);
+    CScript scriptPubKeyOut = GetScriptForCreateZUZ(dest, specId);
+    CTxOut out(amount + prevAmount, scriptPubKeyOut);
+    rawTx.vout.push_back(out);
+
+    // CScript scriptPubKeyZUZ = GetScriptForDestination(dest);
+    // ZUZOut instance(amount, 17, scriptPubKeyZUZ);
+    // rawTx.vout.push_back(instance);
+
+    CScript scriptPubKeyInstance = GetScriptForCreateZUZ(dest, specId);
+    CTxOut instance(amount, scriptPubKeyInstance);
+    rawTx.vout.push_back(instance);
+
+    KeyIO keyIO(Params());
+    bool fGivenKeys = false;
+    CBasicKeyStore tempKeystore;
+    if (params.size() > 3 && !params[3].isNull()) {
+        fGivenKeys = true;
+        UniValue keys = params[3].get_array();
+        for (size_t idx = 0; idx < keys.size(); idx++) {
+            UniValue k = keys[idx];
+            CKey key = keyIO.DecodeSecret(k.get_str());
+            if (!key.IsValid())
+                throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid private key");
+            tempKeystore.AddKey(key);
+        }
+    }
+
+#ifdef ENABLE_WALLET
+    else if (pwalletMain)
+        EnsureWalletIsUnlocked();
+#endif
+
+    // Add previous txouts given in the RPC call:
+    // if (params.size() > 2 && !params[2].isNull()) {
+
+        {
+            CCoinsModifier coins = view.ModifyCoins(txid);
+            if (coins->IsAvailable(nOut) && coins->vout[nOut].scriptPubKey != scriptPubKey) {
+                string err("Previous output scriptPubKey mismatch:\n");
+                err = err + ScriptToAsmStr(coins->vout[nOut].scriptPubKey) + "\nvs:\n"+
+                    ScriptToAsmStr(scriptPubKey);
+                throw JSONRPCError(RPC_DESERIALIZATION_ERROR, err);
+            }
+            if ((unsigned int)nOut >= coins->vout.size())
+                coins->vout.resize(nOut+1);
+            coins->vout[nOut].scriptPubKey = scriptPubKey;
+            coins->vout[nOut].nValue = 0;
+            coins->vout[nOut].nValue = amount;
+        }
+
+        UniValue v = find_value(o, "redeemScript");
+        if (!v.isNull()) {
+            vector<unsigned char> rsData(ParseHexV(v, "redeemScript"));
+            CScript redeemScript(rsData.begin(), rsData.end());
+            tempKeystore.AddCScript(redeemScript);
+        }
+    // }
+
+#ifdef ENABLE_WALLET
+    const CKeyStore& keystore = ((fGivenKeys || !pwalletMain) ? tempKeystore : *pwalletMain);
+#else
+    const CKeyStore& keystore = tempKeystore;
+#endif
+
+    std::vector<CTxOut> allPrevOutputs;
+    if (rawTx.nVersion >= ZIP225_TX_VERSION) {
+        if (!view.HaveInputs(rawTx)) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "Cannot sign v5 transactions without knowing all inputs");
+        }
+        for (const auto& input : rawTx.vin) {
+            allPrevOutputs.push_back(view.GetOutputFor(input));
+        }
+    }
+
+    int chainHeight = chainActive.Height() + 1;
+    if (Params().NetworkIDString() != "regtest") {
+        chainHeight = std::max(chainHeight, APPROX_RELEASE_HEIGHT);
+    }
+
+    auto consensusBranchId = CurrentEpochBranchId(chainHeight, Params().GetConsensus());
+    const CTransaction txConst(rawTx);
+    const PrecomputedTransactionData txdata(txConst, allPrevOutputs);
+
+    int nHashType = SIGHASH_ALL;
+    SignatureData sigdata;
+    if (!(ProduceSignature(MutableTransactionSignatureCreator(&keystore, &rawTx, txdata, 0, amount, nHashType), scriptPubKey, sigdata, consensusBranchId))) {
+        auto strError = "Error: Mint ZUZ transaction was rejected! Reason given: Signing transaction failed";
+		throw JSONRPCError(RPC_WALLET_ERROR, strError);
+    }
+    UpdateTransaction(rawTx, 0, sigdata);
+
+    CTransaction cTx = CTransaction(rawTx);
+    uint256 hash = cTx.GetHash();
+    SendTransaction(cTx, std::vector<RecipientMapping>(), std::nullopt, false);
+
+    //create new instances of ZUZ spec
+    UniValue ret(UniValue::VOBJ);
+    // ret.pushKV("specId", static_cast<uint64_t>(specId));
+    ret.pushKV("amount", static_cast<uint64_t>(mintAmount));
+    ret.pushKV("txId: ", static_cast<std::string>(hash.GetHex()));
+
+    auto stop = high_resolution_clock::now();
+    auto duration = duration_cast<microseconds>(stop - start);
+
+    cout << "mintzuzspec: " << duration.count() << endl;
+
+    return ret;
+}
+
+UniValue transferzuz(const UniValue& params, bool fHelp)
+{
+    auto start = high_resolution_clock::now();
+    
+    if (fHelp || params.size() > 3)
+        throw runtime_error(
+            "mintzuzspec\n"
+            "\nAllows any individual with minting authority over a ZUZ specification to create new instances of it\n"
+            "\nArguments:\n"
+            "1. specID: Unique ID for the ZUZ specification\n"
+            "2. amount: Number of instances to mint\n"
+            "\nResult:\n"
+            "{\n"
+            "  \"specId\"   (numeric) Unique ID for the ZUZ specification\n"
+            "  \"amount\"   (numeric) Number of minted instances\n"
+            "}\n"
+            "\nExamples:\n"
+            + HelpExampleCli("mintzuzspec", "0")
+            + HelpExampleRpc("mintzuzspec", "0")
+        );
+#ifdef ENABLE_WALLET
+    LOCK2(cs_main, pwalletMain ? &pwalletMain->cs_wallet : NULL);
+#else
+    LOCK(cs_main);
+#endif
+
+    if (params[0].isNull())
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, argument 3 must be non-null");
+
+    int nextBlockHeight = chainActive.Height() + 1;
+
+    CMutableTransaction rawTx = CreateNewContextualCMutableTransaction(
+        Params().GetConsensus(), nextBlockHeight, nPreferredTxVersion < ZIP225_MIN_TX_VERSION);
+
+    UniValue inputs = params[0].get_array();
+
+    std::vector<unsigned char> specId;
+    std::vector<uint256> txids;
+    std::vector<int> nOuts;
+    std::vector<CScript> scriptPubKeys;
+    std::vector<CAmount> amounts;
+
+    for (size_t idx = 0; idx < inputs.size(); idx++) {
+        const UniValue& input = inputs[idx];
+        const UniValue& o = input.get_obj();
+
+        uint256 txid = ParseHashO(o, "txid");
+        txids.push_back(txid);
+
+        const UniValue& vout_v = find_value(o, "vout");
+        if (!vout_v.isNum())
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, missing vout key");
+        int nOut = vout_v.get_int();
+        if (nOut < 0)
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, vout must be positive");
+        nOuts.push_back(nOut);
+
+        vector<unsigned char> pkData(ParseHexO(o, "scriptPubKey"));
+        CScript scriptPubKey(pkData.begin(), pkData.end());
+        scriptPubKeys.push_back(scriptPubKey);
+
+        CAmount amount = AmountFromValue(find_value(o, "amount"));
+        amounts.push_back(amount);
+
+        uint32_t nSequence = (rawTx.nLockTime ? std::numeric_limits<uint32_t>::max() - 1 : std::numeric_limits<uint32_t>::max());
+        
+        CTxIn in(COutPoint(txid, nOut), scriptPubKey, nSequence);
+        rawTx.vin.push_back(in);
+
+        uint16_t n = scriptPubKey[25];
+        specId = std::vector<unsigned char>(scriptPubKey.begin() + 26, scriptPubKey.begin() + 26 + n);
+    }
+
+    // Fetch previous transactions (inputs):
+    CCoinsViewDummy viewDummy;
+    CCoinsViewCache view(&viewDummy);
+    {
+        LOCK(mempool.cs);
+        CCoinsViewCache &viewChain = *pcoinsTip;
+        CCoinsViewMemPool viewMempool(&viewChain, mempool);
+        view.SetBackend(viewMempool); // temporarily switch cache backend to db+mempool view
+
+        for (int i = 0; i < rawTx.vin.size(); i++) {
+            const CTxIn& txin = rawTx.vin[i];
+            const uint256& prevHash = txin.prevout.hash;
+            CTransaction tx;
+            uint256 hashBlock = uint256();
+            bool foundTransaction = GetTransaction(prevHash, tx, Params().GetConsensus(), hashBlock, true);
+            if (foundTransaction) {
+                if(tx.IsCreateZUZ() || (tx.IsMintZUZ() && nOuts[i] == 0)) {
+                    throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid input to mint transaction");
+                }
+            }
+            const CCoins* coins = view.AccessCoins(prevHash); // this is certainly allowed to fail
+        }
+
+        view.SetBackend(viewDummy); // switch back to avoid locking mempool for too long
+    }
+
+    KeyIO keyIO(Params());
+    UniValue outputs = params[1].get_array();
+    for (size_t idx = 0; idx < outputs.size(); idx++) {
+        UniValue output = outputs[idx];
+        const UniValue& obj = output.get_obj();
+
+        const std::string& address = find_value(obj, "address").get_str();
+        CAmount amountInstance = AmountFromValue(find_value(obj, "amount"));
+
+        CTxDestination destination = keyIO.DecodeDestination(address);
+        if (!IsValidDestination(destination)) {
+            throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, std::string("Invalid Zcash address: ") + address);
+        }
+        printf("address: %s\n", address.c_str());
+
+        CScript scriptPubKeyInstance = GetScriptForCreateZUZ(destination, specId);
+        CTxOut instance(amountInstance, scriptPubKeyInstance);
+        rawTx.vout.push_back(instance);
+    }
+
+#ifdef ENABLE_WALLET
+    if (pwalletMain)
+        EnsureWalletIsUnlocked();
+#endif
+
+    for (size_t idx = 0; idx < inputs.size(); idx++) {
+        uint256 txid = txids[idx];
+        int nOut = nOuts[idx];
+        CScript scriptPubKey = scriptPubKeys[idx];
+        CAmount amount = amounts[idx];
+
+        {
+            CCoinsModifier coins = view.ModifyCoins(txid);
+            if (coins->IsAvailable(nOut) && coins->vout[nOut].scriptPubKey != scriptPubKey) {
+                string err("Previous output scriptPubKey mismatch:\n");
+                err = err + ScriptToAsmStr(coins->vout[nOut].scriptPubKey) + "\nvs:\n"+
+                    ScriptToAsmStr(scriptPubKey);
+                throw JSONRPCError(RPC_DESERIALIZATION_ERROR, err);
+            }
+            if ((unsigned int)nOut >= coins->vout.size())
+                coins->vout.resize(nOut+1);
+            coins->vout[nOut].scriptPubKey = scriptPubKey;
+            coins->vout[nOut].nValue = amount;
+        }
+
+        // UniValue v = find_value(o, "redeemScript");
+        // if (!v.isNull()) {
+        //     vector<unsigned char> rsData(ParseHexV(v, "redeemScript"));
+        //     CScript redeemScript(rsData.begin(), rsData.end());
+        //     tempKeystore.AddCScript(redeemScript);
+        // }
+    }
+
+    bool fGivenKeys = false;
+    CBasicKeyStore tempKeystore;
+    if (params.size() > 3 && !params[3].isNull()) {
+        fGivenKeys = true;
+        UniValue keys = params[3].get_array();
+        for (size_t idx = 0; idx < keys.size(); idx++) {
+            UniValue k = keys[idx];
+            CKey key = keyIO.DecodeSecret(k.get_str());
+            if (!key.IsValid())
+                throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid private key");
+            tempKeystore.AddKey(key);
+        }
+    }
+
+#ifdef ENABLE_WALLET
+    const CKeyStore& keystore = ((fGivenKeys || !pwalletMain) ? tempKeystore : *pwalletMain);
+#else
+    const CKeyStore& keystore = tempKeystore;
+#endif
+
+    std::vector<CTxOut> allPrevOutputs;
+    if (rawTx.nVersion >= ZIP225_TX_VERSION) {
+        if (!view.HaveInputs(rawTx)) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "Cannot sign v5 transactions without knowing all inputs");
+        }
+        for (const auto& input : rawTx.vin) {
+            allPrevOutputs.push_back(view.GetOutputFor(input));
+        }
+    }
+
+    int chainHeight = chainActive.Height() + 1;
+    if (Params().NetworkIDString() != "regtest") {
+        chainHeight = std::max(chainHeight, APPROX_RELEASE_HEIGHT);
+    }
+
+    auto consensusBranchId = CurrentEpochBranchId(chainHeight, Params().GetConsensus());
+    const CTransaction txConst(rawTx);
+    const PrecomputedTransactionData txdata(txConst, allPrevOutputs);
+    UniValue vErrors(UniValue::VARR);
+
+    for (unsigned int i = 0; i < rawTx.vin.size(); i++) {
+        CTxIn& txin = rawTx.vin[i];
+        CScript scriptPubKey = rawTx.vout[txin.prevout.n].scriptPubKey;
+
+        const CCoins* coins = view.AccessCoins(txin.prevout.hash);
+        if (coins == NULL || !coins->IsAvailable(txin.prevout.n)) {
+            // TxInErrorToJSON(txin, vErrors, "Input not found or already spent");
+            continue;
+        }
+        const CScript& prevPubKey = coins->vout[txin.prevout.n].scriptPubKey;
+        const CAmount& amount = coins->vout[txin.prevout.n].nValue;
+
+        int nHashType = SIGHASH_ALL;
+        SignatureData sigdata;
+        if (!(ProduceSignature(MutableTransactionSignatureCreator(&keystore, &rawTx, txdata, 0, amount, nHashType), scriptPubKey, sigdata, consensusBranchId))) {
+            auto strError = "Error: Mint ZUZ transaction was rejected! Reason given: Signing transaction failed";
+            throw JSONRPCError(RPC_WALLET_ERROR, strError);
+        }
+        UpdateTransaction(rawTx, 0, sigdata);
+    }
+
+    CTransaction cTx = CTransaction(rawTx);
+    uint256 hash = cTx.GetHash();
+    SendTransaction(cTx, std::vector<RecipientMapping>(), std::nullopt, false);
+
+    //create new instances of ZUZ spec
+    UniValue ret(UniValue::VOBJ);
+    // ret.pushKV("specId", static_cast<uint64_t>(specId));
+    ret.pushKV("txId: ", static_cast<std::string>(hash.GetHex()));
+
+    auto stop = high_resolution_clock::now();
+    auto duration = duration_cast<microseconds>(stop - start);
+
+    cout << "transferzuz: " << duration.count() << endl;
+
+    return ret;
+}
+
+UniValue transferzuz2(const UniValue& params, bool fHelp)
+{
+    auto start = high_resolution_clock::now();
+    
+    if (!EnsureWalletIsAvailable(fHelp))
+        return NullUniValue;
+
+    if (fHelp || params.size() < 3 || params.size() > 6)
+        throw runtime_error(
+            "z_sendmany \"fromaddress\" [{\"address\":... ,\"amount\":...},...] ( minconf ) ( fee ) ( privacyPolicy )\n"
+            "\nSend a transaction with multiple recipients. Amounts are decimal numbers with at"
+            "\nmost 8 digits of precision. Change generated from one or more transparent"
+            "\naddresses flows to a new transparent address, while change generated from a"
+            "\nlegacy Sapling address returns to itself. When sending from a unified address,"
+            "\nchange is returned to the internal-only address for the associated unified account."
+            "\nWhen spending coinbase UTXOs, only shielded recipients are permitted and change is not allowed;"
+            "\nthe entire value of the coinbase UTXO(s) must be consumed."
+            + HelpRequiringPassphrase() + "\n"
+            "\nArguments:\n"
+            "1. \"fromaddress\"         (string, required) The transparent or shielded address to send the funds from.\n"
+            "                           The following special strings are also accepted:\n"
+            "                               - \"ANY_TADDR\": Select non-coinbase UTXOs from any transparent addresses belonging to the wallet.\n"
+            "                                              Use z_shieldcoinbase to shield coinbase UTXOs from multiple transparent addresses.\n"
+            "                           If a unified address is provided for this argument, the TXOs to be spent will be selected from those\n"
+            "                           associated with the account corresponding to that unified address, from value pools corresponding\n"
+            "                           to the receivers included in the UA.\n"
+            "2. \"amounts\"             (array, required) An array of json objects representing the amounts to send.\n"
+            "    [{\n"
+            "      \"address\":address  (string, required) The address is a taddr, zaddr, or Unified Address\n"
+            "      \"amount\":amount    (numeric, required) The numeric amount in " + CURRENCY_UNIT + " is the value\n"
+            "      \"memo\":memo        (string, optional) If the address is a zaddr, raw data represented in hexadecimal string format. If\n"
+            "                           the output is being sent to a transparent address, it’s an error to include this field.\n"
+            "    }, ... ]\n"
+            "3. minconf               (numeric, optional, default=" + strprintf("%u", DEFAULT_NOTE_CONFIRMATIONS) + ") Only use funds confirmed at least this many times.\n"
+            "4. fee                   (numeric, optional, default=null) The fee amount in " + CURRENCY_UNIT + " to attach to this transaction. The default behavior\n"
+            "                         is to use a fee calculated according to ZIP 317.\n"
+            "5. privacyPolicy         (string, optional, default=\"LegacyCompat\") Policy for what information leakage is acceptable.\n"
+            "                         One of the following strings:\n"
+            "                               - \"FullPrivacy\": Only allow fully-shielded transactions (involving a single shielded value pool).\n"
+            "                               - \"LegacyCompat\": If the transaction involves any Unified Addresses, this is equivalent to\n"
+            "                                 \"FullPrivacy\". Otherwise, this is equivalent to \"AllowFullyTransparent\".\n"
+            "                               - \"AllowRevealedAmounts\": Allow funds to cross between shielded value pools, revealing the amount\n"
+            "                                 that crosses pools.\n"
+            "                               - \"AllowRevealedRecipients\": Allow transparent recipients. This also implies revealing\n"
+            "                                 information described under \"AllowRevealedAmounts\".\n"
+            "                               - \"AllowRevealedSenders\": Allow transparent funds to be spent, revealing the sending\n"
+            "                                 addresses and amounts. This implies revealing information described under \"AllowRevealedAmounts\".\n"
+            "                               - \"AllowFullyTransparent\": Allow transaction to both spend transparent funds and have\n"
+            "                                 transparent recipients. This implies revealing information described under \"AllowRevealedSenders\"\n"
+            "                                 and \"AllowRevealedRecipients\".\n"
+            "                               - \"AllowLinkingAccountAddresses\": Allow selecting transparent coins from the full account,\n"
+            "                                 rather than just the funds sent to the transparent receiver in the provided Unified Address.\n"
+            "                                 This implies revealing information described under \"AllowRevealedSenders\".\n"
+            "                               - \"NoPrivacy\": Allow the transaction to reveal any information necessary to create it.\n"
+            "                                 This implies revealing information described under \"AllowFullyTransparent\" and\n"
+            "                                 \"AllowLinkingAccountAddresses\".\n"
+            "\nResult:\n"
+            "\"operationid\"          (string) An operationid to pass to z_getoperationstatus to get the result of the operation.\n"
+            "\nExamples:\n"
+            + HelpExampleCli("z_sendmany", "\"t1M72Sfpbz1BPpXFHz9m3CdqATR44Jvaydd\" '[{\"address\": \"ztfaW34Gj9FrnGUEf833ywDVL62NWXBM81u6EQnM6VR45eYnXhwztecW1SjxA7JrmAXKJhxhj3vDNEpVCQoSvVoSpmbhtjf\", \"amount\": 5.0}]'")
+            + HelpExampleCli("z_sendmany", "\"ANY_TADDR\" '[{\"address\": \"t1M72Sfpbz1BPpXFHz9m3CdqATR44Jvaydd\", \"amount\": 2.0}]'")
+            + HelpExampleCli("z_sendmany", "\"ANY_TADDR\" '[{\"address\": \"t1M72Sfpbz1BPpXFHz9m3CdqATR44Jvaydd\", \"amount\": 2.0}]' 1 null 'AllowFullyTransparent'")
+            + HelpExampleCli("z_sendmany", "\"ANY_TADDR\" '[{\"address\": \"t1M72Sfpbz1BPpXFHz9m3CdqATR44Jvaydd\", \"amount\": 2.0}]' 1 5000")
+            + HelpExampleRpc("z_sendmany", "\"t1M72Sfpbz1BPpXFHz9m3CdqATR44Jvaydd\", [{\"address\": \"ztfaW34Gj9FrnGUEf833ywDVL62NWXBM81u6EQnM6VR45eYnXhwztecW1SjxA7JrmAXKJhxhj3vDNEpVCQoSvVoSpmbhtjf\", \"amount\": 5.0}]")
+        );
+
+    LOCK2(cs_main, pwalletMain->cs_wallet);
+
+    const auto& chainparams = Params();
+    int nextBlockHeight = chainActive.Height() + 1;
+
+    ThrowIfInitialBlockDownload();
+    if (!chainparams.GetConsensus().NetworkUpgradeActive(nextBlockHeight, Consensus::UPGRADE_SAPLING)) {
+        throw JSONRPCError(
+            RPC_INVALID_PARAMETER, "Cannot create shielded transactions before Sapling has activated");
+    }
+
+    KeyIO keyIO(chainparams);
+
+    UniValue outputs = params[2].get_array();
+    if (outputs.size() == 0) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, amounts array is empty.");
+    }
+
+    SpendableInputs spendable;
+    UniValue o = params[1].get_obj();
+    uint256 txid = ParseHashO(o, "txid");
+
+    const UniValue& vout_v = find_value(o, "vout");
+    if (!vout_v.isNum())
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, missing vout key");
+    int nOut = vout_v.get_int();
+    // if (nOut < 0)
+    //     throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, vout must be positive");
+    // else if (nOut == 0) 
+    //     throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, vout must not be first output in array");
+
+    vector<unsigned char> pkData(ParseHexO(o, "scriptPubKey"));
+    CScript scriptPubKey(pkData.begin(), pkData.end());
+
+    CAmount amount = AmountFromValue(find_value(o, "amount"));
+
+    // uint32_t nSequence = (rawTx.nLockTime ? std::numeric_limits<uint32_t>::max() - 1 : std::numeric_limits<uint32_t>::max());
+    
+    // CTxIn in(COutPoint(txid, nOut), scriptPubKey, nSequence);
+    // rawTx.vin.push_back(in);
+
+    uint16_t n = scriptPubKey[25];
+    std::vector<unsigned char> specId = std::vector<unsigned char>(scriptPubKey.begin() + 26, scriptPubKey.begin() + 26 + n);
+    // COutput(const CWalletTx *txIn, int iIn, std::optional<CTxDestination> destination, int nDepthIn, bool fSpendableIn);
+
+
+    std::set<PaymentAddress> recipientAddrs;
+    std::vector<Payment> recipients;
+    bool hasTransparentRecipient = false;
+    CAmount nTotalOut = 0;
+    size_t nOrchardOutputs = 0;
+    for (const UniValue& o : outputs.getValues()) {
+        if (!o.isObject())
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, expected object");
+
+        // sanity check, report error if unknown key-value pairs
+        for (const std::string& s : o.getKeys()) {
+            if (s != "address" && s != "amount" && s != "memo")
+                throw JSONRPCError(RPC_INVALID_PARAMETER, string("Invalid parameter, unknown key: ") + s);
+        }
+
+        std::string addrStr = find_value(o, "address").get_str();
+        auto addr = keyIO.DecodePaymentAddress(addrStr);
+        if (!addr.has_value()) {
+            throw JSONRPCError(
+                    RPC_INVALID_PARAMETER,
+                    std::string("Invalid parameter, unknown address format: ") + addrStr);
+        }
+
+        if (!recipientAddrs.insert(addr.value()).second) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, string("Invalid parameter, duplicated recipient address: ") + addrStr);
+        }
+
+        // auto memo = ParseMemo(find_value(o, "memo"));
+        UniValue m(UniValue::VSTR, "17");
+        auto memo = ParseMemo(m);
+
+        UniValue av = find_value(o, "amount");
+        CAmount nAmount = AmountFromValue( av );
+        if (nAmount < 0) {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid parameter, amount must be positive");
+        }
+
+        // int16_t specId = -1;
+        // UniValue isZUZ = find_value(o, "specId");
+        // if (isZUZ.has_value()) {
+        //     specId = AmountFromValue(isZUZ);
+        // }
+
+        hasTransparentRecipient = hasTransparentRecipient || examine(addr.value(), match {
+            [](const CKeyID &) { return true; },
+            [](const CScriptID &) { return true; },
+            [&](const UnifiedAddress &ua) {
+                auto preferredRecipient =
+                    ua.GetPreferredRecipientAddress(chainparams.GetConsensus(), nextBlockHeight);
+                return preferredRecipient.has_value()
+                        && examine(preferredRecipient.value(), match {
+                            [](const CKeyID &) { return true; },
+                            [](const CScriptID &) { return true; },
+                            [](const auto &) { return false; }
+                        });
+            },
+            [](const auto &) { return false; }
+        });
+
+        recipients.push_back(Payment(addr.value(), nAmount, memo));
+        nTotalOut += nAmount;
+    }
+    if (recipients.empty()) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "No recipients");
+    }
+
+    // Check that the from address is valid.
+    // Unified address (UA) allowed here (#5185)
+    auto fromaddress = params[0].get_str();
+    std::optional<PaymentAddress> sender;
+    if (fromaddress != "ANY_TADDR") {
+        auto decoded = keyIO.DecodePaymentAddress(fromaddress);
+        if (decoded.has_value()) {
+            sender = decoded.value();
+        } else {
+            throw JSONRPCError(
+                    RPC_INVALID_ADDRESS_OR_KEY,
+                    "Invalid from address: should be a taddr, zaddr, UA, or the string 'ANY_TADDR'.");
+        }
+    }
+
+    auto strategy =
+        ResolveTransactionStrategy(
+                ReifyPrivacyPolicy(
+                        std::nullopt,
+                        params.size() > 5 ? std::optional(params[5].get_str()) : std::nullopt),
+                InterpretLegacyCompat(sender, recipientAddrs));
+
+    auto ztxoSelector = [&]() {
+        if (!sender.has_value()) {
+            return CWallet::LegacyTransparentZTXOSelector(true, TransparentCoinbasePolicy::Disallow);
+        } else {
+            auto ztxoSelectorOpt = pwalletMain->ZTXOSelectorForAddress(
+                sender.value(),
+                true,
+                strategy.AllowRevealedSenders() && !hasTransparentRecipient
+                ? TransparentCoinbasePolicy::Allow
+                : TransparentCoinbasePolicy::Disallow,
+                strategy.PermittedAccountSpendingPolicy());
+            if (!ztxoSelectorOpt.has_value()) {
+                throw JSONRPCError(
+                        RPC_INVALID_ADDRESS_OR_KEY,
+                        "Invalid from address, no payment source found for address.");
+            }
+
+            auto selectorAccount = pwalletMain->FindAccountForSelector(ztxoSelectorOpt.value());
+            bool unknownOrLegacy = !selectorAccount.has_value() || selectorAccount.value() == ZCASH_LEGACY_ACCOUNT;
+            examine(sender.value(), match {
+                [&](const libzcash::UnifiedAddress& ua) {
+                    if (unknownOrLegacy) {
+                        throw JSONRPCError(
+                                RPC_INVALID_ADDRESS_OR_KEY,
+                                "Invalid from address, UA does not correspond to a known account.");
+                    }
+                },
+                [&](const auto& other) {
+                    if (!unknownOrLegacy) {
+                        throw JSONRPCError(
+                                RPC_INVALID_ADDRESS_OR_KEY,
+                                "Invalid from address: is a bare receiver from a Unified Address in this wallet. Provide the UA as returned by z_getaddressforaccount instead.");
+                    }
+                }
+            });
+
+            return ztxoSelectorOpt.value();
+        }
+    }();
+
+    // Sanity check for transaction size
+    // TODO: move this to the builder?
+    auto txsize = EstimateTxSize(ztxoSelector, recipients, nextBlockHeight);
+    if (txsize > MAX_TX_SIZE_AFTER_SAPLING) {
+        throw JSONRPCError(
+                RPC_INVALID_PARAMETER,
+                strprintf("Too many outputs, size of raw transaction would be larger than limit of %d bytes", MAX_TX_SIZE_AFTER_SAPLING));
+    }
+
+    // Minimum confirmations
+    int nMinDepth = parseMinconf(DEFAULT_NOTE_CONFIRMATIONS, params, 3, std::nullopt);
+
+    std::optional<CAmount> nFee;
+    if (params.size() > 3 && !params[4].isNull()) {
+        nFee = AmountFromValue( params[4] );
+    }
+
+    // Use input parameters as the optional context info to be returned by z_getoperationstatus and z_getoperationresult.
+    UniValue obj(UniValue::VOBJ);
+    obj.pushKV("fromaddress", params[0]);
+    obj.pushKV("amounts", params[2]);
+    obj.pushKV("minconf", nMinDepth);
+    if (nFee.has_value()) {
+        obj.pushKV("fee", ValueFromAmount(nFee.value()));
+    }
+    UniValue contextInfo = obj;
+
+    // Create operation and add to global queue
+    auto nAnchorDepth = std::min((unsigned int) nMinDepth, nAnchorConfirmations);
+    WalletTxBuilder builder(chainparams, minRelayTxFee);
+
+    // TransactionEffects(
+    //     nAnchorConfirmations,
+    //     SpendableInputs spendable,
+    //     payments,
+    //     std::optional<ChangeAddress> changeAddr,
+    //     CAmount fee,
+    //     uint256 internalOVK,
+    //     uint256 externalOVK,
+    //     int anchorHeight);
+
+    std::shared_ptr<AsyncRPCQueue> q = getAsyncRPCQueue();
+    std::shared_ptr<AsyncRPCOperation> operation(
+            new AsyncRPCOperation_sendmany(
+                std::move(builder), ztxoSelector, recipients, nMinDepth, nAnchorDepth, strategy, nFee, contextInfo)
+            );
+    q->addOperation(operation);
+    AsyncRPCOperationId operationId = operation->getId();
+
+    auto stop = high_resolution_clock::now();
+    auto duration = duration_cast<microseconds>(stop - start);
+
+    cout << "transferzuz2: " << duration.count() << endl;
+
+    return operationId;
+}
+
 #endif
 
 extern UniValue dumpprivkey(const UniValue& params, bool fHelp); // in rpcdump.cpp
@@ -6090,6 +6900,9 @@ static const CRPCCommand commands[] =
 #ifdef ENABLE_ZUZ
     { "zuz",                "createzuzspec",            &createzuzspec,            true  },
     { "zuz",                "getzuzspec",               &getzuzspec,               true  },
+    { "zuz",                "mintzuzspec",              &mintzuzspec,              true  },
+    { "zuz",                "transferzuz",              &transferzuz,              true  },
+    { "zuz",                "transferzuz2",             &transferzuz2,              true  },
 #endif
     // TODO: rearrange into another category
     { "disclosure",         "z_getpaymentdisclosure",   &z_getpaymentdisclosure,   true  },

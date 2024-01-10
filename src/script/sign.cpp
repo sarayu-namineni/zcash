@@ -44,6 +44,7 @@ static bool Sign1(const CKeyID& address, const BaseSignatureCreator& creator, co
     vector<unsigned char> vchSig;
     if (!creator.CreateSig(vchSig, address, scriptCode, consensusBranchId))
         return false;
+    // ret.push_back(ToByteVector(std::vector<unsigned char>{0xf, 0x1}));
     ret.push_back(vchSig);
     return true;
 }
@@ -135,6 +136,7 @@ bool ProduceSignature(const BaseSignatureCreator& creator, const CScript& fromPu
     CScript script = fromPubKey;
     bool solved = true;
     std::vector<valtype> result;
+    // result.push_back(ToByteVector(std::vector<unsigned char>(1, 7)));
     txnouttype whichType;
     solved = SignStep(creator, script, result, whichType, consensusBranchId);
     CScript subscript;
@@ -152,7 +154,10 @@ bool ProduceSignature(const BaseSignatureCreator& creator, const CScript& fromPu
     sigdata.scriptSig = PushAll(result);
 
     // Test solution
-    return solved && VerifyScript(sigdata.scriptSig, fromPubKey, STANDARD_SCRIPT_VERIFY_FLAGS, creator.Checker(), consensusBranchId);
+    ScriptError serror;
+    bool verifyScript = VerifyScript(sigdata.scriptSig, fromPubKey, STANDARD_SCRIPT_VERIFY_FLAGS, creator.Checker(), consensusBranchId, &serror);
+    printf("serror: %u\n", serror);
+    return solved && verifyScript;
 }
 
 SignatureData DataFromTransaction(const CMutableTransaction& tx, unsigned int nIn)

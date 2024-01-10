@@ -144,6 +144,9 @@ const char* GetOpName(opcodetype opcode)
 
     case OP_INVALIDOPCODE          : return "OP_INVALIDOPCODE";
 
+    // ZUZ
+    case OP_ZUZ                    : return "OP_ZUZ";
+
     default:
         return "OP_UNKNOWN";
     }
@@ -195,6 +198,36 @@ unsigned int CScript::GetSigOpCount(const CScript& scriptSig) const
     /// ... and return its opcount:
     CScript subscript(data.begin(), data.end());
     return subscript.GetSigOpCount(true);
+}
+
+// ZUZ
+bool CScript::IsCreateZUZ() const
+{
+    // unsigned int n = GetSigOpCount(false);
+    if (this->size() >= 27) {
+        unsigned int n = (*this)[25];
+        printf("go\n");
+        // printf("size: %d, n: %d, %d, %d, %d, %d, %d, %d, n > 0: %d, 25 + n: %d, (*this)[26 + n] == OP_EQUAL: %d\n", 
+        //     this->size(), n, 
+        //     this->size() == (27 + n),
+        //     (*this)[0] == OP_DUP,
+        //     (*this)[1] == OP_HASH160,
+        //     (*this)[2] == 0x14,
+        //     (*this)[23] == OP_EQUALVERIFY,
+        //     (*this)[24] == OP_CHECKSIGVERIFY,
+        //     n > 0,
+        //     26 + n,
+        //     (*this)[26 + n] == OP_EQUAL);
+        return (this->size() == (27 + n) &&
+            (*this)[0] == OP_DUP &&
+            (*this)[1] == OP_HASH160 &&
+            (*this)[2] == 0x14 &&
+            (*this)[23] == OP_EQUALVERIFY &&
+            (*this)[24] == OP_CHECKSIGVERIFY &&
+            n > 0 &&
+            (*this)[26 + n] == OP_EQUAL);
+    }
+    return false;
 }
 
 // insightexplorer

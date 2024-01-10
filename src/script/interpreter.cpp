@@ -216,6 +216,13 @@ bool static CheckPubKeyEncoding(const valtype &vchSig, unsigned int flags, Scrip
 }
 
 bool static CheckMinimalPush(const valtype& data, opcodetype opcode) {
+    // printf("data len: %lu\n", data.size());
+    // printf("data: \n");
+    // for (auto i : data) {
+    //         printf("%d", i);
+    // }
+    // printf("\n");
+    // printf("opcode: %d\n", opcode);
     if (data.size() == 0) {
         // Could have used OP_0.
         return opcode == OP_0;
@@ -575,9 +582,23 @@ bool EvalScript(
                 case OP_DUP:
                 {
                     // (x -- x x)
-                    if (stack.size() < 1)
+                    if (stack.size() < 1) {
+                        // printf("dup\n");
                         return set_error(serror, SCRIPT_ERR_INVALID_STACK_OPERATION);
+                    }
                     valtype vch = stacktop(-1);
+                    // printf("stack.size: %lu\n", stack.size());
+                    // printf("stacktop:\n");
+                    int i = -1;
+                    while (i * -1 <= stack.size()) {
+                        valtype vch1 = stacktop(i);
+                        for (unsigned char c : vch1) {
+                            printf("%u", c);
+                        }
+                        printf("\n");
+                        i--;
+                    }
+                    printf("\n");
                     stack.push_back(vch);
                 }
                 break;
@@ -666,14 +687,33 @@ bool EvalScript(
                 // Bitwise logic
                 //
                 case OP_EQUAL:
+                    // printf("equal\n");
                 case OP_EQUALVERIFY:
                 //case OP_NOTEQUAL: // use OP_NUMNOTEQUAL
                 {
                     // (x1 x2 - bool)
-                    if (stack.size() < 2)
+                    if (stack.size() < 2) {
+                        printf("stack.size(): %lu\n", stack.size());
+                        if (stack.size() > 0) {
+                            valtype& vch1 = stacktop(-1);
+                            printf("stacktop:\n");
+                            for (unsigned char c : vch1) {
+                                printf("%u\n", c);
+                            }
+                        }
                         return set_error(serror, SCRIPT_ERR_INVALID_STACK_OPERATION);
+                    }
                     valtype& vch1 = stacktop(-2);
+                    // printf("stacktop:\n");
+                    // for (unsigned char c : vch1) {
+                    //     printf("%u", c);
+                    // }
+                    // printf("\n");
                     valtype& vch2 = stacktop(-1);
+                    // for (unsigned char c : vch2) {
+                    //     printf("%u", c);
+                    // }
+                    // printf("\n");
                     bool fEqual = (vch1 == vch2);
                     // OP_NOTEQUAL is disabled because it would be too easy to say
                     // something like n != 1 and have some wiseguy pass in 1 with extra
@@ -830,8 +870,10 @@ bool EvalScript(
                 case OP_CHECKSIGVERIFY:
                 {
                     // (sig pubkey -- bool)
-                    if (stack.size() < 2)
+                    if (stack.size() < 2) {
+                        // printf("checksigverify\n");
                         return set_error(serror, SCRIPT_ERR_INVALID_STACK_OPERATION);
+                    }
 
                     valtype& vchSig    = stacktop(-2);
                     valtype& vchPubKey = stacktop(-1);
